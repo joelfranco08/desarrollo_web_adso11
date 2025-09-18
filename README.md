@@ -13,3 +13,9 @@ sacar una conclusión ficticia mientras se va actualizando el documento
 
 Albert: El alcance y el resultado esperado(lee bien, agrega lo necesario y si
 tienes alguna duda consultar con el grupo)
+
+andres
+:Portada y Cronograma del trabajo (yo tomaré la portada ya que
+tengo el logo y se mas o menos los requisitos necesarios, el cronograma
+también lo tomaré pero esto es más que todo para trabajar TODOS pero haré
+un boceto principal para comenzar)

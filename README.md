@@ -9,3 +9,5 @@ David
 :Hoja de presentación (como ella la pidió antes de 3x3) y una
 conclusión (con la propuesta de desarrollo debería ser suficiente para poder
 sacar una conclusión ficticia mientras se va actualizando el documento
+Albert: El alcance y el resultado esperado(lee bien, agrega lo necesario y si
+tienes alguna duda consultar con el grupo)

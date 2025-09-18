@@ -1,1 +1,1 @@
-Juan: De la introducción y los OBJETIVOS
+Juan: De la introducción y los objetivos

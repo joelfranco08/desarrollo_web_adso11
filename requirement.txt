@@ -1,8 +1,0 @@
-Flask==3.0.0
-Flask-SQLAlchemy==3.1.1
-Flask-Login==0.6.3
-PyMySQL==1.1.1
-Werkzeug==3.0.1
-
-#nota: usar esto para otros computadores, ya que no se uso entorno virtual, necesitamos importar o instalar estas librerias que son las principales para la funcionalidad del proyecto
-#pip install -r requirements.txt

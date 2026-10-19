@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { 
   LayoutDashboard, 
   Calendar as CalendarIcon, 
@@ -13,10 +13,58 @@ import DashboardInicio from './components/DashboardInicio';
 import VistaAgenda from './components/VistaAgenda';
 import VistaDetalleCliente from './components/VistaDetalleCliente';
 import VistaHorario from './components/VistaHorario';
+import { getDashboardSummary } from './services/api';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('inicio');
   const [clienteSeleccionado, setClienteSeleccionado] = useState(null);
+
+  // Estado para guardar los datos reales del dashboard que vienen de Flask
+  const [dashboardData, setDashboardData] = useState({
+    citasAgendadas: null,
+    enProceso: null,
+    finalizados: null,
+    fechaActual: '',
+    sede: ''
+  });
+  const [dashboardLoading, setDashboardLoading] = useState(true);
+  const [dashboardError, setDashboardError] = useState('');
+
+  const loadDashboardSummary = useCallback(async () => {
+    try {
+      const { data } = await getDashboardSummary();
+      setDashboardData(data);
+    } catch (error) {
+      console.error('Error cargando el resumen del dashboard:', error);
+      setDashboardError(
+        error.response?.data?.error || 'No fue posible cargar el resumen del dashboard.'
+      );
+    } finally {
+      setDashboardLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    getDashboardSummary()
+      .then(({ data }) => {
+        if (active) setDashboardData(data);
+      })
+      .catch((error) => {
+        console.error('Error cargando el resumen del dashboard:', error);
+        if (active) {
+          setDashboardError(
+            error.response?.data?.error || 'No fue posible cargar el resumen del dashboard.'
+          );
+        }
+      })
+      .finally(() => {
+        if (active) setDashboardLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const handleSeleccionarCliente = (dataCita) => {
     setClienteSeleccionado(dataCita);
@@ -32,16 +80,16 @@ export default function App() {
               MEYER <span className="text-[#C5A059] font-normal">SPA</span>
             </h1>
             <p className="text-[10px] uppercase tracking-[0.25em] text-[#8C857B] mt-1 font-semibold">
-              PANEL AUXILIAR
+              {dashboardData.sede || 'MEYER SPA'}
             </p>
           </div>
 
           <div className="bg-white/80 p-3.5 rounded-2xl border border-[#EFECE6] flex items-center gap-3 mb-6 shadow-sm">
             <div className="w-10 h-10 rounded-xl bg-[#2E2A27] text-[#FDFBF7] font-serif font-bold flex items-center justify-center text-sm">
-              ML
+              A
             </div>
             <div className="overflow-hidden">
-              <h4 className="text-sm font-bold text-[#2E2A27] truncate">María López</h4>
+              <h4 className="text-sm font-bold text-[#2E2A27] truncate">Auxiliar</h4>
               <span className="text-xs text-[#8C857B] block">Auxiliar</span>
             </div>
           </div>
@@ -71,23 +119,34 @@ export default function App() {
 
           <div className="flex items-center gap-4">
             <span className="hidden sm:inline-block text-xs italic font-serif text-[#C5A059]">
-              "Tu bienestar comienza aquí"
+              {dashboardData.fechaActual || (dashboardLoading ? 'Cargando resumen...' : '—')}
             </span>
             <button className="relative p-2.5 rounded-full bg-[#F9F6F0] text-[#2E2A27] border border-[#EFECE6] hover:bg-[#EFECE6] transition-all cursor-pointer">
               <Bell size={18} />
               <span className="absolute top-2 right-2 w-2 h-2 bg-[#C5A059] rounded-full"></span>
             </button>
             <div className="w-9 h-9 rounded-full bg-[#2E2A27] text-white flex items-center justify-center font-serif text-xs font-bold md:hidden">
-              ML
+              A
             </div>
           </div>
         </header>
 
         <main className="p-6 lg:p-10 flex-1 max-w-7xl w-full mx-auto">
-          {activeTab === 'inicio' && <DashboardInicio onViewAgenda={() => setActiveTab('agenda')} />}
+          {activeTab === 'inicio' && (
+            <DashboardInicio
+              summary={dashboardData}
+              loading={dashboardLoading}
+              error={dashboardError}
+              onViewAgenda={() => setActiveTab('agenda')}
+            />
+          )}
           {activeTab === 'agenda' && <VistaAgenda onViewCliente={handleSeleccionarCliente} />}
           {(activeTab === 'clientes' || activeTab === 'procedimientos') && (
-            <VistaDetalleCliente clienteSeleccionado={clienteSeleccionado} />
+            <VistaDetalleCliente
+              key={`${activeTab}-${clienteSeleccionado?.id || 'lista'}`}
+              clienteSeleccionado={clienteSeleccionado}
+              onDataChanged={loadDashboardSummary}
+            />
           )}
           {activeTab === 'horario' && <VistaHorario />}
         </main>

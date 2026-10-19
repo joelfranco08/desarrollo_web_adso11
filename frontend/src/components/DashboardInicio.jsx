@@ -1,29 +1,7 @@
-import React, { useState, useEffect } from 'react';
 import { Clock, RefreshCw, CheckCircle2, CalendarDays, MapPin, ArrowRight } from 'lucide-react';
-import { getDashboardSummary } from '../services/api';
 
-export default function DashboardInicio({ onViewAgenda }) {
-  const [metrics, setMetrics] = useState({
-    citasAgendadas: 5,
-    enProceso: 2,
-    finalizados: 1,
-    fechaActual: 'Miércoles, 23 de Septiembre de 2026',
-    sede: 'Barranquilla • Sede Principal'
-  });
-  const [loading, setLoading] = useState(false);
-
-  useEffect(() => {
-    // Petición real al backend Flask
-    setLoading(true);
-    getDashboardSummary()
-      .then((res) => {
-        if (res.data) setMetrics(res.data);
-      })
-      .catch((err) => {
-        console.warn('API no disponible aun, usando datos locales:', err);
-      })
-      .finally(() => setLoading(false));
-  }, []);
+export default function DashboardInicio({ summary, loading, error, onViewAgenda }) {
+  const metrics = summary;
 
   return (
     <div className="space-y-8 animate-fadeIn">
@@ -40,21 +18,27 @@ export default function DashboardInicio({ onViewAgenda }) {
         </p>
       </div>
 
+      {error && (
+        <p role="alert" className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          {error}
+        </p>
+      )}
+
       {/* Grid de Métricas con Variables Reales */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <MetricCard 
-          number={loading ? '...' : metrics.citasAgendadas} 
+          number={loading ? '...' : metrics.citasAgendadas ?? '—'}
           label="CITAS AGENDADAS HOY" 
           icon={<Clock className="text-[#C5A059]" size={22} />} 
         />
         <MetricCard 
-          number={loading ? '...' : metrics.enProceso} 
+          number={loading ? '...' : metrics.enProceso ?? '—'}
           label="EN ESTE MOMENTO" 
           icon={<RefreshCw className="text-[#1565C0]" size={22} />} 
           accent="border-blue-100 bg-blue-50/30"
         />
         <MetricCard 
-          number={loading ? '...' : metrics.finalizados} 
+          number={loading ? '...' : metrics.finalizados ?? '—'}
           label="PROCEDIMIENTOS FINALIZADOS" 
           icon={<CheckCircle2 className="text-emerald-600" size={22} />} 
           accent="border-emerald-100 bg-emerald-50/30"
@@ -69,9 +53,9 @@ export default function DashboardInicio({ onViewAgenda }) {
           </div>
           <div>
             <span className="text-xs font-semibold text-[#8C857B] tracking-wider uppercase">Agenda Diaria</span>
-            <h4 className="font-serif text-xl font-bold text-[#2E2A27] mt-0.5">{metrics.fechaActual}</h4>
+            <h4 className="font-serif text-xl font-bold text-[#2E2A27] mt-0.5">{metrics.fechaActual || '—'}</h4>
             <p className="text-xs text-[#8C857B] flex items-center gap-1 mt-1">
-              <MapPin size={14} className="text-[#C5A059]" /> {metrics.sede}
+              <MapPin size={14} className="text-[#C5A059]" /> {metrics.sede || '—'}
             </p>
           </div>
         </div>

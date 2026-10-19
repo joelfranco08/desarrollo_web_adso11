@@ -1,51 +1,43 @@
 import React, { useState, useEffect } from 'react';
-import { Star, ChevronRight } from 'lucide-react';
+import { ChevronRight } from 'lucide-react';
 import { getCitasAuxiliar } from '../services/api';
 
-const DATA_INICIAL_CITAS = [
-  {
-    id: 101,
-    time: "09:00 AM",
-    title: "Limpieza facial profunda",
-    client: "Valeria Sotomayor",
-    clienteId: "VAL-101",
-    rating: "5.0",
-    visits: "8 visitas previas",
-    duration: "60 min",
-    cabina: "Cabina 1",
-    status: "Finalizado",
-    statusStyle: "bg-[#E8F5E9] text-[#2E7D32]"
-  },
-  {
-    id: 102,
-    time: "11:30 AM",
-    title: "Masaje relajante con piedras volcánicas",
-    client: "Carlos Mendoza",
-    clienteId: "CAR-102",
-    rating: "4.9",
-    visits: "3 visitas previas",
-    duration: "90 min",
-    cabina: "Cabina 2",
-    status: "En proceso",
-    statusStyle: "bg-[#E3F2FD] text-[#1565C0]"
-  }
-];
-
 export default function VistaAgenda({ onViewCliente }) {
-  const [citas, setCitas] = useState(DATA_INICIAL_CITAS);
-  const [loading, setLoading] = useState(false);
+  const [citas, setCitas] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [fechaHoy] = useState(() => new Date());
+  const fechaISO = [
+    fechaHoy.getFullYear(),
+    String(fechaHoy.getMonth() + 1).padStart(2, '0'),
+    String(fechaHoy.getDate()).padStart(2, '0'),
+  ].join('-');
+  const fechaLegible = fechaHoy.toLocaleDateString('es-CO', {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+  });
 
   useEffect(() => {
-    setLoading(true);
-    getCitasAuxiliar()
-      .then((res) => {
-        if (res.data && res.data.length > 0) setCitas(res.data);
+    let active = true;
+    getCitasAuxiliar({ fecha: fechaISO })
+      .then(({ data }) => {
+        if (active) setCitas(data);
       })
-      .catch((err) => {
-        console.warn('Usando lista de citas local:', err);
+      .catch((requestError) => {
+        console.error('Error cargando las citas:', requestError);
+        if (active) {
+          setError(requestError.response?.data?.error || 'No fue posible cargar las citas.');
+        }
       })
-      .finally(() => setLoading(false));
-  }, []);
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [fechaISO]);
 
   return (
     <div className="space-y-6 animate-fadeIn">
@@ -53,7 +45,7 @@ export default function VistaAgenda({ onViewCliente }) {
       <div className="bg-[#F9F6F0] border border-[#EFECE6] rounded-2xl p-6 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
           <span className="text-xs font-bold text-[#C5A059] tracking-widest uppercase">Agenda en curso</span>
-          <h2 className="font-serif text-2xl font-bold text-[#2E2A27] mt-0.5">Miércoles, 23 de Septiembre de 2026</h2>
+          <h2 className="font-serif text-2xl font-bold text-[#2E2A27] mt-0.5 capitalize">{fechaLegible}</h2>
           <p className="text-xs text-[#8C857B] mt-1">Barranquilla • Sede Principal</p>
         </div>
         <div className="bg-white px-4 py-2 rounded-xl border border-[#EFECE6] text-xs font-bold text-[#2E2A27] shadow-sm">
@@ -63,8 +55,15 @@ export default function VistaAgenda({ onViewCliente }) {
 
       {/* Mapeo dinámico de Citas desde la API o Estado */}
       <div className="space-y-4">
+        {error && (
+          <p role="alert" className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+            {error}
+          </p>
+        )}
         {loading ? (
           <div className="text-center py-10 text-[#8C857B]">Cargando citas del día...</div>
+        ) : citas.length === 0 && !error ? (
+          <div className="text-center py-10 text-[#8C857B]">No hay citas registradas para hoy.</div>
         ) : (
           citas.map((cita) => (
             <AppointmentCard 
@@ -80,7 +79,12 @@ export default function VistaAgenda({ onViewCliente }) {
 }
 
 function AppointmentCard({ citaData, onAction }) {
-  const { time, duration, title, status, statusStyle, client, rating, visits, cabina } = citaData;
+  const { time, duration, title, status, client, visits, cabina } = citaData;
+  const statusStyle = status?.toLowerCase() === 'finalizado'
+    ? 'bg-[#E8F5E9] text-[#2E7D32]'
+    : status?.toLowerCase() === 'en proceso'
+      ? 'bg-[#E3F2FD] text-[#1565C0]'
+      : 'bg-[#FFF8E1] text-[#8A6D1D]';
 
   return (
     <div className="bg-[#F9F6F0] hover:bg-white border border-[#EFECE6] hover:border-[#C5A059]/40 rounded-2xl p-6 transition-all shadow-sm flex flex-col lg:flex-row items-start lg:items-center justify-between gap-6">
@@ -99,13 +103,8 @@ function AppointmentCard({ citaData, onAction }) {
           </div>
           <p className="text-sm font-semibold text-[#2E2A27]">{client}</p>
           <div className="flex flex-wrap items-center gap-3 text-xs text-[#8C857B] mt-1.5">
-            <span className="flex items-center gap-1 text-[#C5A059] font-medium">
-              <Star size={13} fill="#C5A059" /> {rating}
-            </span>
-            <span>•</span>
-            <span>{visits}</span>
-            <span>•</span>
-            <span className="font-medium text-[#2E2A27]">{cabina}</span>
+            {visits && <span>{visits}</span>}
+            {cabina && <span className="font-medium text-[#2E2A27]">{cabina}</span>}
           </div>
         </div>
       </div>

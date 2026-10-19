@@ -1,7 +1,8 @@
-from flask import Flask, jsonify
+from flask import Flask, jsonify, request
 from flask_sqlalchemy import SQLAlchemy
 from flask_cors import CORS
-from datetime import datetime
+from datetime import date, datetime, time, timedelta
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 app = Flask(__name__)
 CORS(app)  # Habilita la comunicación con React (puerto 5173)
@@ -145,55 +146,395 @@ class Notificacion(db.Model):
 # 2. ENDPOINTS API REST
 # =============================================================================
 
+def _json_body():
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict):
+        return None
+    return body
+
+
+def _parse_value(value, value_type):
+    if value_type is date:
+        return date.fromisoformat(value)
+    if value_type is time:
+        return time.fromisoformat(value)
+    if value_type is datetime:
+        return datetime.fromisoformat(value)
+    return value
+
+
+def _cita_json(cita):
+    cliente = cita.cliente
+    servicio = cita.servicio
+    return {
+        "id": cita.id_cita,
+        "fecha": cita.fecha.isoformat(),
+        "time": cita.hora_inicio.strftime("%I:%M %p") if cita.hora_inicio else None,
+        "horaInicio": cita.hora_inicio.isoformat() if cita.hora_inicio else None,
+        "horaFin": cita.hora_fin.isoformat() if cita.hora_fin else None,
+        "title": servicio.nombre if servicio else "Procedimiento general",
+        "duration": f"{servicio.duracion_min} min" if servicio else None,
+        "client": f"{cliente.nombres} {cliente.apellidos}" if cliente else "Cliente",
+        "clienteId": cliente.id_cliente if cliente else None,
+        "cliente": _cliente_json(cliente) if cliente else None,
+        "cabina": cita.cabina.nombre if cita.cabina else None,
+        "status": cita.estado,
+        "visits": f"{len(cliente.citas)} visitas" if cliente else None,
+        "procedimientos": [_procedimiento_json(item) for item in cita.procedimientos],
+    }
+
+
+def _cliente_json(cliente):
+    return {
+        "id": cliente.id_cliente,
+        "nombre": f"{cliente.nombres} {cliente.apellidos}",
+        "nombres": cliente.nombres,
+        "apellidos": cliente.apellidos,
+        "cedula": cliente.cedula,
+        "telefono": cliente.telefono,
+        "correo": cliente.correo,
+        "fechaNacimiento": cliente.fecha_nacimiento.isoformat() if cliente.fecha_nacimiento else None,
+        "alergiasNotasMedicas": cliente.alergias_notas_medicas,
+    }
+
+
+def _horario_json(horario):
+    if horario.es_descanso:
+        turno = horario.turno or "Día de descanso"
+    else:
+        entrada = horario.hora_entrada.strftime("%H:%M")
+        salida = horario.hora_salida.strftime("%H:%M")
+        turno = f"{horario.turno + ' ' if horario.turno else ''}{entrada} -> {salida}"
+    return {
+        "id": horario.id_horario,
+        "fecha": horario.fecha.isoformat(),
+        "day": horario.dia_semana[:3] if horario.dia_semana else "",
+        "date": horario.fecha.strftime("%d"),
+        "shift": turno,
+        "active": not horario.es_descanso,
+        "rest": horario.es_descanso,
+        "horaEntrada": horario.hora_entrada.isoformat(),
+        "horaSalida": horario.hora_salida.isoformat(),
+        "turno": horario.turno,
+        "idAuxiliar": horario.id_auxiliar,
+    }
+
+
+def _update_record(record, body, fields):
+    if not body:
+        raise ValueError("Indica al menos un campo para actualizar.")
+    unknown_fields = body.keys() - fields.keys()
+    if unknown_fields:
+        raise ValueError(f"Campos no permitidos: {', '.join(sorted(unknown_fields))}.")
+    for field, (column, value_type) in fields.items():
+        if field not in body:
+            continue
+        value = body[field]
+        if value_type is bool:
+            if not isinstance(value, bool):
+                raise ValueError(f"'{field}' debe ser booleano.")
+        elif value_type is int and isinstance(value, bool):
+            raise ValueError(f"'{field}' debe ser un entero.")
+        elif value is not None and value_type in (date, time, datetime):
+            value = _parse_value(value, value_type)
+        elif value is not None and not isinstance(value, value_type):
+            raise ValueError(f"'{field}' tiene un tipo inválido.")
+        setattr(record, column, value)
+
+
+def _save_changes():
+    try:
+        db.session.commit()
+        return None
+    except IntegrityError:
+        db.session.rollback()
+        app.logger.exception("La actualización entra en conflicto con los datos existentes.")
+        return jsonify({"error": "La actualización entra en conflicto con los datos existentes."}), 409
+    except SQLAlchemyError:
+        db.session.rollback()
+        app.logger.exception("No se pudieron guardar los cambios en la base de datos.")
+        return jsonify({"error": "No se pudieron guardar los cambios."}), 500
+
+
+@app.errorhandler(SQLAlchemyError)
+def handle_database_error(error):
+    db.session.rollback()
+    app.logger.exception("Error consultando la base de datos: %s", error)
+    return jsonify({"error": "No fue posible completar la operación en la base de datos."}), 500
+
+
 @app.route('/api/auxiliar/dashboard-summary', methods=['GET'])
 def dashboard_summary():
+    hoy = date.today()
+    citas_hoy = Cita.query.filter(Cita.fecha == hoy)
+    procedimientos_hoy = Procedimiento.query.join(Cita).filter(Cita.fecha == hoy)
+    dias = ("lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo")
+    meses = (
+        "enero", "febrero", "marzo", "abril", "mayo", "junio",
+        "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre",
+    )
     return jsonify({
-        "citasAgendadas": 5,
-        "enProceso": 2,
-        "finalizados": 1,
-        "fechaActual": "Miércoles, 23 de Septiembre de 2026",
+        "citasAgendadas": citas_hoy.count(),
+        "enProceso": procedimientos_hoy.filter(Procedimiento.estado.ilike("en proceso")).count(),
+        "finalizados": procedimientos_hoy.filter(Procedimiento.estado.ilike("finalizado")).count(),
+        "fechaActual": (
+            f"{dias[hoy.weekday()]}, {hoy.day} de "
+            f"{meses[hoy.month - 1]} de {hoy.year}"
+        ),
         "sede": "Barranquilla • Sede Principal"
     })
 
 @app.route('/api/auxiliar/citas', methods=['GET'])
 def get_citas_auxiliar():
+    query = Cita.query
+    fecha = request.args.get("fecha")
+    id_auxiliar_raw = request.args.get("id_auxiliar")
+    id_cliente_raw = request.args.get("id_cliente")
     try:
-        citas = Cita.query.all()
-        resultado = []
-        for c in citas:
-            resultado.append({
-                "id": c.id_cita,
-                "time": c.hora_inicio.strftime("%I:%M %p") if c.hora_inicio else "09:00 AM",
-                "title": c.servicio.nombre if c.servicio else "Procedimiento general",
-                "client": f"{c.cliente.nombres} {c.cliente.apellidos}" if c.cliente else "Cliente",
-                "duration": f"{c.servicio.duracion_min} min" if c.servicio else "60 min",
-                "cabina": c.cabina.nombre if c.cabina else "Cabina 1",
-                "status": c.estado,
-                "statusStyle": "bg-[#E8F5E9] text-[#2E7D32]" if c.estado == 'Finalizado' else "bg-[#E3F2FD] text-[#1565C0]",
-                "rating": "5.0",
-                "visits": "8 visitas previas"
-            })
-        return jsonify(resultado)
-    except Exception:
-        return jsonify([])
+        id_auxiliar = int(id_auxiliar_raw) if id_auxiliar_raw else None
+        id_cliente = int(id_cliente_raw) if id_cliente_raw else None
+        if (id_auxiliar is not None and id_auxiliar <= 0) or (id_cliente is not None and id_cliente <= 0):
+            raise ValueError
+    except ValueError:
+        return jsonify({"error": "'id_auxiliar' y 'id_cliente' deben ser enteros positivos."}), 400
+    if fecha:
+        try:
+            query = query.filter(Cita.fecha == date.fromisoformat(fecha))
+        except ValueError:
+            return jsonify({"error": "'fecha' debe tener formato YYYY-MM-DD."}), 400
+    if id_auxiliar:
+        query = query.filter_by(id_auxiliar=id_auxiliar)
+    if id_cliente:
+        query = query.filter_by(id_cliente=id_cliente)
+    citas = query.order_by(Cita.fecha, Cita.hora_inicio).all()
+    return jsonify([_cita_json(cita) for cita in citas])
+
+
+@app.route('/api/auxiliar/citas/<int:cita_id>', methods=['GET', 'PATCH', 'PUT'])
+def cita_detalle(cita_id):
+    cita = db.session.get(Cita, cita_id)
+    if not cita:
+        return jsonify({"error": "Cita no encontrada."}), 404
+    if request.method == "GET":
+        return jsonify(_cita_json(cita))
+
+    body = _json_body()
+    if body is None:
+        return jsonify({"error": "Se requiere un objeto JSON."}), 400
+    fields = {
+        "fecha": ("fecha", date),
+        "hora_inicio": ("hora_inicio", time),
+        "hora_fin": ("hora_fin", time),
+        "estado": ("estado", str),
+        "id_auxiliar": ("id_auxiliar", int),
+        "id_servicio": ("id_servicio", int),
+        "id_cabina": ("id_cabina", int),
+    }
+    try:
+        _update_record(cita, body, fields)
+        for field in ("fecha", "hora_inicio", "hora_fin", "estado", "id_auxiliar", "id_servicio"):
+            if field in body and body[field] is None:
+                raise ValueError(f"'{field}' no puede ser nulo.")
+        if "estado" in body and not cita.estado.strip():
+            raise ValueError("'estado' no puede estar vacío.")
+        if "id_auxiliar" in body and not db.session.get(Auxiliar, cita.id_auxiliar):
+            raise ValueError("El auxiliar indicado no existe.")
+        if "id_servicio" in body and not db.session.get(Servicio, cita.id_servicio):
+            raise ValueError("El servicio indicado no existe.")
+        if "id_cabina" in body and cita.id_cabina is not None and not db.session.get(Cabina, cita.id_cabina):
+            raise ValueError("La cabina indicada no existe.")
+        if cita.hora_inicio and cita.hora_fin and cita.hora_fin <= cita.hora_inicio:
+            raise ValueError("'hora_fin' debe ser posterior a 'hora_inicio'.")
+    except (TypeError, ValueError) as error:
+        db.session.rollback()
+        return jsonify({"error": str(error)}), 400
+    result = _save_changes()
+    if result:
+        return result
+    return jsonify(_cita_json(cita))
+
+
+@app.route('/api/clientes', methods=['GET'])
+def get_clientes():
+    clientes = Cliente.query.order_by(Cliente.apellidos, Cliente.nombres).all()
+    return jsonify([_cliente_json(cliente) for cliente in clientes])
+
+
+@app.route('/api/clientes/<int:cliente_id>', methods=['GET', 'PATCH', 'PUT'])
+def cliente_detalle(cliente_id):
+    cliente = db.session.get(Cliente, cliente_id)
+    if not cliente:
+        return jsonify({"error": "Cliente no encontrado."}), 404
+    if request.method == "GET":
+        return jsonify(_cliente_json(cliente))
+    body = _json_body()
+    if body is None:
+        return jsonify({"error": "Se requiere un objeto JSON."}), 400
+    fields = {
+        "nombres": ("nombres", str),
+        "apellidos": ("apellidos", str),
+        "cedula": ("cedula", str),
+        "telefono": ("telefono", str),
+        "correo": ("correo", str),
+        "fecha_nacimiento": ("fecha_nacimiento", date),
+        "alergias_notas_medicas": ("alergias_notas_medicas", str),
+    }
+    try:
+        _update_record(cliente, body, fields)
+        for field in ("nombres", "apellidos", "cedula", "correo"):
+            if field in body and body[field] is None:
+                raise ValueError(f"'{field}' no puede ser nulo.")
+        if (
+            not cliente.nombres.strip()
+            or not cliente.apellidos.strip()
+            or not cliente.cedula.strip()
+            or not cliente.correo.strip()
+        ):
+            raise ValueError("Nombres, apellidos, cédula y correo son obligatorios.")
+    except (TypeError, ValueError) as error:
+        db.session.rollback()
+        return jsonify({"error": str(error)}), 400
+    result = _save_changes()
+    if result:
+        return result
+    return jsonify(_cliente_json(cliente))
+
+
+@app.route('/api/procedimientos', methods=['GET'])
+def get_procedimientos():
+    procedimientos = Procedimiento.query.order_by(Procedimiento.id_procedimiento).all()
+    return jsonify([_procedimiento_json(procedimiento) for procedimiento in procedimientos])
+
+
+def _procedimiento_json(procedimiento):
+    return {
+        "id": procedimiento.id_procedimiento,
+        "idCita": procedimiento.id_cita,
+        "descripcion": procedimiento.descripcion,
+        "observaciones": procedimiento.observaciones,
+        "inicioReal": procedimiento.inicio_real.isoformat() if procedimiento.inicio_real else None,
+        "finReal": procedimiento.fin_real.isoformat() if procedimiento.fin_real else None,
+        "estado": procedimiento.estado,
+    }
+
+
+@app.route('/api/procedimientos/<int:procedimiento_id>', methods=['GET', 'PATCH', 'PUT'])
+def procedimiento_detalle(procedimiento_id):
+    procedimiento = db.session.get(Procedimiento, procedimiento_id)
+    if not procedimiento:
+        return jsonify({"error": "Procedimiento no encontrado."}), 404
+    if request.method == "GET":
+        return jsonify(_procedimiento_json(procedimiento))
+    body = _json_body()
+    if body is None:
+        return jsonify({"error": "Se requiere un objeto JSON."}), 400
+    fields = {
+        "descripcion": ("descripcion", str),
+        "observaciones": ("observaciones", str),
+        "inicio_real": ("inicio_real", datetime),
+        "fin_real": ("fin_real", datetime),
+        "estado": ("estado", str),
+    }
+    try:
+        _update_record(procedimiento, body, fields)
+        if "estado" in body and not procedimiento.estado:
+            raise ValueError("'estado' no puede estar vacío.")
+        if procedimiento.estado and procedimiento.estado.casefold() == "en proceso" and not procedimiento.inicio_real:
+            procedimiento.inicio_real = datetime.now()
+        if procedimiento.estado and procedimiento.estado.casefold() == "finalizado" and not procedimiento.fin_real:
+            procedimiento.fin_real = datetime.now()
+        if procedimiento.inicio_real and procedimiento.fin_real and procedimiento.fin_real < procedimiento.inicio_real:
+            raise ValueError("'fin_real' no puede ser anterior a 'inicio_real'.")
+    except (TypeError, ValueError) as error:
+        db.session.rollback()
+        return jsonify({"error": str(error)}), 400
+    result = _save_changes()
+    if result:
+        return result
+    return jsonify(_procedimiento_json(procedimiento))
+
+
+@app.route('/api/horarios', methods=['GET'])
+def get_horarios():
+    query = Horario.query
+    id_auxiliar_raw = request.args.get("id_auxiliar")
+    try:
+        id_auxiliar = int(id_auxiliar_raw) if id_auxiliar_raw else None
+        if id_auxiliar is not None and id_auxiliar <= 0:
+            raise ValueError
+    except ValueError:
+        return jsonify({"error": "'id_auxiliar' debe ser un entero positivo."}), 400
+    if id_auxiliar:
+        query = query.filter_by(id_auxiliar=id_auxiliar)
+    return jsonify([_horario_json(horario) for horario in query.order_by(Horario.fecha).all()])
+
+
+@app.route('/api/horarios/<int:horario_id>', methods=['GET', 'PATCH', 'PUT'])
+def horario_detalle(horario_id):
+    horario = db.session.get(Horario, horario_id)
+    if not horario:
+        return jsonify({"error": "Horario no encontrado."}), 404
+    if request.method == "GET":
+        return jsonify(_horario_json(horario))
+    body = _json_body()
+    if body is None:
+        return jsonify({"error": "Se requiere un objeto JSON."}), 400
+    fields = {
+        "fecha": ("fecha", date),
+        "dia_semana": ("dia_semana", str),
+        "hora_entrada": ("hora_entrada", time),
+        "hora_salida": ("hora_salida", time),
+        "turno": ("turno", str),
+        "es_descanso": ("es_descanso", bool),
+        "id_auxiliar": ("id_auxiliar", int),
+    }
+    try:
+        _update_record(horario, body, fields)
+        for field in ("fecha", "hora_entrada", "hora_salida", "id_auxiliar"):
+            if field in body and body[field] is None:
+                raise ValueError(f"'{field}' no puede ser nulo.")
+        if "id_auxiliar" in body and not db.session.get(Auxiliar, horario.id_auxiliar):
+            raise ValueError("El auxiliar indicado no existe.")
+        if not horario.es_descanso and horario.hora_salida <= horario.hora_entrada:
+            raise ValueError("'hora_salida' debe ser posterior a 'hora_entrada'.")
+    except (TypeError, ValueError) as error:
+        db.session.rollback()
+        return jsonify({"error": str(error)}), 400
+    result = _save_changes()
+    if result:
+        return result
+    return jsonify(_horario_json(horario))
 
 @app.route('/api/auxiliar/horario', methods=['GET'])
 def get_horario_auxiliar():
+    hoy = date.today()
+    inicio_semana = hoy - timedelta(days=hoy.weekday())
+    fin_semana = inicio_semana + timedelta(days=6)
+    query = Horario.query.filter(Horario.fecha.between(inicio_semana, fin_semana))
+    id_auxiliar_raw = request.args.get("id_auxiliar")
+    try:
+        id_auxiliar = int(id_auxiliar_raw) if id_auxiliar_raw else None
+        if id_auxiliar is not None and id_auxiliar <= 0:
+            raise ValueError
+    except ValueError:
+        return jsonify({"error": "'id_auxiliar' debe ser un entero positivo."}), 400
+    if id_auxiliar:
+        query = query.filter_by(id_auxiliar=id_auxiliar)
+    horarios = query.order_by(Horario.fecha).all()
+    dias_laborales = [horario for horario in horarios if not horario.es_descanso]
+    horas_totales = sum(
+        (datetime.combine(horario.fecha, horario.hora_salida) -
+         datetime.combine(horario.fecha, horario.hora_entrada)).total_seconds() / 3600
+        for horario in dias_laborales
+    )
+    descanso = next((horario.dia_semana for horario in horarios if horario.es_descanso), None)
     return jsonify({
         "resumen": {
-            "diasLaborales": "6",
-            "horasTotales": "44",
-            "diaDescanso": "Dom"
+            "diasLaborales": str(len(dias_laborales)),
+            "horasTotales": f"{horas_totales:g}",
+            "diaDescanso": descanso[:3] if descanso else "—",
         },
-        "dias": [
-            {"day": "Lun", "date": "21", "shift": "Turno mañana 07:00 -> 15:00 - Cabina 1 & 2", "active": True},
-            {"day": "Mar", "date": "22", "shift": "Turno tarde 13:00 -> 21:00 - Cabina 3", "active": True},
-            {"day": "Mié", "date": "23", "shift": "Turno mañana 07:00 -> 15:00 - Cabina 1", "active": True, "highlight": True},
-            {"day": "Jue", "date": "24", "shift": "Turno mañana 07:00 -> 15:00 - Cabina 2", "active": True},
-            {"day": "Vie", "date": "25", "shift": "Turno tarde 13:00 -> 21:00 - Cabina 1 & 3", "active": True},
-            {"day": "Sáb", "date": "26", "shift": "Turno especial 08:00 -> 16:00 - Cabina 2", "active": True},
-            {"day": "Dom", "date": "27", "shift": "Día de descanso", "rest": True}
-        ]
+        "dias": [_horario_json(horario) for horario in horarios],
     })
 
 if __name__ == '__main__':

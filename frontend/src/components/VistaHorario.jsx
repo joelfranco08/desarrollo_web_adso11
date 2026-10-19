@@ -2,29 +2,41 @@ import React, { useState, useEffect } from 'react';
 import { CalendarDays, Clock, Sparkles } from 'lucide-react';
 import { getHorarioAuxiliar } from '../services/api';
 
-const DIAS_HORARIO_INICIAL = [
-  { day: "Lun", date: "21", shift: "Turno mañana 07:00 -> 15:00 - Cabina 1 & 2", active: true },
-  { day: "Mar", date: "22", shift: "Turno tarde 13:00 -> 21:00 - Cabina 3", active: true },
-  { day: "Mié", date: "23", shift: "Turno mañana 07:00 -> 15:00 - Cabina 1", active: true, highlight: true },
-  { day: "Jue", date: "24", shift: "Turno mañana 07:00 -> 15:00 - Cabina 2", active: true },
-  { day: "Vie", date: "25", shift: "Turno tarde 13:00 -> 21:00 - Cabina 1 & 3", active: true },
-  { day: "Sáb", date: "26", shift: "Turno especial 08:00 -> 16:00 - Cabina 2", active: true },
-  { day: "Dom", date: "27", shift: "Día de descanso", rest: true }
-];
-
 export default function VistaHorario() {
-  const [schedule, setSchedule] = useState(DIAS_HORARIO_INICIAL);
-  const [summary, setSummary] = useState({ diasLaborales: "6", horasTotales: "44", diaDescanso: "Dom" });
+  const [schedule, setSchedule] = useState([]);
+  const [summary, setSummary] = useState({ diasLaborales: "—", horasTotales: "—", diaDescanso: "—" });
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [todayISO] = useState(() => {
+    const today = new Date();
+    return [
+      today.getFullYear(),
+      String(today.getMonth() + 1).padStart(2, '0'),
+      String(today.getDate()).padStart(2, '0'),
+    ].join('-');
+  });
 
   useEffect(() => {
+    let active = true;
     getHorarioAuxiliar()
-      .then((res) => {
-        if (res.data) {
-          if (res.data.dias) setSchedule(res.data.dias);
-          if (res.data.resumen) setSummary(res.data.resumen);
+      .then(({ data }) => {
+        if (active) {
+          setSchedule(data.dias || []);
+          setSummary(data.resumen || { diasLaborales: "0", horasTotales: "0", diaDescanso: "—" });
         }
       })
-      .catch((err) => console.warn('Usando esquema de horario local:', err));
+      .catch((requestError) => {
+        console.error('Error cargando el horario:', requestError);
+        if (active) {
+          setError(requestError.response?.data?.error || 'No fue posible cargar el horario.');
+        }
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
   }, []);
 
   return (
@@ -41,13 +53,22 @@ export default function VistaHorario() {
         <h3 className="font-serif text-xl font-bold text-[#2E2A27]">Mi horario</h3>
 
         <div className="space-y-4">
-          {schedule.map((item, idx) => (
+          {error && (
+            <p role="alert" className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+              {error}
+            </p>
+          )}
+          {loading ? (
+            <p className="py-8 text-center text-sm text-[#8C857B]">Cargando horario...</p>
+          ) : schedule.length === 0 && !error ? (
+            <p className="py-8 text-center text-sm text-[#8C857B]">No hay horarios registrados para esta semana.</p>
+          ) : schedule.map((item) => (
             <DayRow 
-              key={idx}
+              key={item.id}
               day={item.day}
               date={item.date}
               shift={item.shift}
-              highlight={item.highlight}
+              highlight={item.fecha === todayISO}
               rest={item.rest}
             />
           ))}

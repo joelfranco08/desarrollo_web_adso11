@@ -25,8 +25,6 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-[#FDFBF7] text-[#2E2A27] font-sans flex antialiased">
-      
-      {/* 1. SIDEBAR IZQUIERDO FIJO */}
       <aside className="w-68 bg-[#F9F6F0] border-r border-[#EFECE6] flex flex-col justify-between p-6 fixed h-full z-20 hidden md:flex">
         <div>
           <div className="mb-8 px-2">
@@ -49,36 +47,11 @@ export default function App() {
           </div>
 
           <nav className="space-y-1.5">
-            <SidebarItem 
-              icon={<LayoutDashboard size={18} />} 
-              label="Inicio" 
-              active={activeTab === 'inicio'} 
-              onClick={() => setActiveTab('inicio')} 
-            />
-            <SidebarItem 
-              icon={<CalendarIcon size={18} />} 
-              label="Agenda" 
-              active={activeTab === 'agenda'} 
-              onClick={() => setActiveTab('agenda')} 
-            />
-            <SidebarItem 
-              icon={<Users size={18} />} 
-              label="Clientes" 
-              active={activeTab === 'clientes'} 
-              onClick={() => setActiveTab('clientes')} 
-            />
-            <SidebarItem 
-              icon={<Sparkles size={18} />} 
-              label="Procedimientos" 
-              active={activeTab === 'procedimientos'} 
-              onClick={() => setActiveTab('procedimientos')} 
-            />
-            <SidebarItem 
-              icon={<Clock size={18} />} 
-              label="Horario" 
-              active={activeTab === 'horario'} 
-              onClick={() => setActiveTab('horario')} 
-            />
+            <SidebarItem icon={<LayoutDashboard size={18} />} label="Inicio" active={activeTab === 'inicio'} onClick={() => setActiveTab('inicio')} />
+            <SidebarItem icon={<CalendarIcon size={18} />} label="Agenda" active={activeTab === 'agenda'} onClick={() => setActiveTab('agenda')} />
+            <SidebarItem icon={<Users size={18} />} label="Clientes" active={activeTab === 'clientes'} onClick={() => setActiveTab('clientes')} />
+            <SidebarItem icon={<Sparkles size={18} />} label="Procedimientos" active={activeTab === 'procedimientos'} onClick={() => setActiveTab('procedimientos')} />
+            <SidebarItem icon={<Clock size={18} />} label="Horario" active={activeTab === 'horario'} onClick={() => setActiveTab('horario')} />
           </nav>
         </div>
 
@@ -88,9 +61,7 @@ export default function App() {
         </button>
       </aside>
 
-      {/* 2. CONTENIDO PRINCIPAL Y HEADER */}
       <div className="flex-1 md:pl-68 flex flex-col min-w-0">
-        
         <header className="h-20 bg-[#FDFBF7]/90 backdrop-blur-md border-b border-[#EFECE6] px-6 lg:px-10 flex items-center justify-between sticky top-0 z-10">
           <div className="flex items-center gap-2 text-xs text-[#8C857B]">
             <span>Auxiliar</span>

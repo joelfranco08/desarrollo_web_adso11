@@ -1,0 +1,21 @@
+# Node / React
+frontend/node_modules/
+frontend/dist/
+.DS_Store
+
+# Python / Flask
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+env/
+venv/
+ENV/
+*.log
+
+# Entorno y configuración local
+.env
+instance/
+.idea/
+.vscode/
